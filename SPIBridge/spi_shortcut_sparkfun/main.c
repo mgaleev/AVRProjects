@@ -37,7 +37,7 @@ void change_frequency(void);
 void set_dorder(void);
 void show_settings(void);
 
-char const main_menu[] PROGMEM = "\n\r\n\r------SparkFun SPI Shortcut------\n\r\n\rMAIN MENU:\n\r(1) Actions\n\r(2) Settings\n\r\n\r";	
+char const main_menu[] PROGMEM = "\n\r\n\r---Custom SparkFun SPI Shortcut v1.0---\n\r\n\rMAIN MENU:\n\r(1) Actions\n\r(2) Settings\n\r\n\r";	
 char const arrow[] PROGMEM = "->";
 char const invalid[] PROGMEM = "Invalid Character\n\r";
 char const send_single[] PROGMEM = "Enter characters to send, press enter to return to menu\n\r->";
