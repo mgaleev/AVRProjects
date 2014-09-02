@@ -5,9 +5,9 @@
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
 
-volatile uint8_t current_phase = '1';
-volatile uint8_t current_dorder = '0';
-volatile uint8_t current_frequency = '4';
+volatile uint8_t current_phase = '1';     // Mode 1
+volatile uint8_t current_dorder = '0';    // MSB First
+volatile uint8_t current_frequency = '4'; // 500KHz
 
 volatile uint16_t bits;
 volatile uint8_t cnt;
@@ -355,16 +355,23 @@ void set_polarity_phase(void)
 	switch(c)
 	{
 		case '1':
-			SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE);
+		    SPCR &= ~(1<<CPHA);
+		    SPCR &= ~(1<<CPOL);
+			SPCR |= ((1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE));
 			break;
 		case '2':
-			SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE) | (1<<CPHA);
+		    SPCR |= (1<<CPHA);
+		    SPCR &= ~(1<<CPOL);
+			SPCR |= ((1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE));
 			break;
 		case '3':
-			SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE) | (1<<CPOL);
+		    SPCR &= ~(1<<CPHA);
+		    SPCR |= (1<<CPOL);
+			SPCR |= ((1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE));
 			break;
 		case '4':
-			SPCR = (1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE) | (1<<CPHA) | (1<<CPOL);
+		    SPCR |= ((1<<CPHA) | (1<<CPOL));
+			SPCR |= ((1<<SPE) | (1<<MSTR) | (1<<SPR0) | (1<<SPIE));
 			break;
 		default:
 		{
@@ -407,7 +414,7 @@ void set_dorder(void)
 	c = getc245_blocking();
 	printf245("%c\n\r",c);
 	current_dorder = c;
-	if(c){ SPCR |= (1<<DORD); }
+	if(c == '1'){ SPCR |= (1<<DORD); }
 	else{ SPCR &= ~(1<<DORD); }
 	my_printf(DORDER_CHANGED);
 	settings_menu();
