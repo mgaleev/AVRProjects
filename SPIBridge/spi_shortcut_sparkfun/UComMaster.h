@@ -134,3 +134,5 @@ typedef struct{
 #define MSB 22
 #define LSB 23
 #define DELAY 24
+#define L3_PROMPT 25
+#define LINE_SET 26
