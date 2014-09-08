@@ -38,8 +38,9 @@ void set_dorder(void);
 void show_settings(void);
 
 void send_command_string_custom_l3(void);
+void send_command_string_custom_rf(void);
 
-char const main_menu[] PROGMEM = "\n\r\n\r---Custom SparkFun SPI Shortcut v1.1---\n\r\n\rMAIN MENU:\n\r(1) Actions\n\r(2) Settings\n\r(3) Custom: L3 Board\n\r\n\r";	
+char const main_menu[] PROGMEM = "\n\r\n\r---Custom SparkFun SPI Shortcut v1.2---\n\r\n\rMAIN MENU:\n\r(1) Actions\n\r(2) Settings\n\r(3) Custom: L3 Board\n\r(4) Custom: RF Board\n\r\n\r";	
 char const arrow[] PROGMEM = "->";
 char const invalid[] PROGMEM = "Invalid Character\n\r";
 char const send_single[] PROGMEM = "Enter characters to send, press enter to return to menu\n\r->";
@@ -67,6 +68,7 @@ char const command_delay[] PROGMEM = "Delay 10ms\n\r";
 
 char const l3_prompt[] PROGMEM = "L3->";
 char const line_set[] PROGMEM = "Line status is set!";
+char const rf_prompt[] PROGMEM = "RF->";
 
 PGM_P const string_table[] PROGMEM = 
 {
@@ -96,7 +98,8 @@ PGM_P const string_table[] PROGMEM =
 	lsb,
 	command_delay,
 	l3_prompt,
-	line_set
+	line_set,
+	rf_prompt
 };
 
 
@@ -157,6 +160,20 @@ void menu()
 			SPSR &= ~(1<<SPI2X);
 		    send_command_string_custom_l3();
 			break;	
+		case '4':
+		    // Set Line 1 (PC4/SDA) Line 2 (PC5/SCL) configuration
+			DDRC &= ~(1<<SDA); // in
+			DDRC &= ~(1<<SCL); // in
+		    PORTC |= ((1<<SDA) | (1<<SCL)); // pull-up/pull-up
+		    // Set SPI configuration for communication with RFM board
+		    current_phase = '1';     // Mode 1
+		    current_dorder = '0';    // MSB First
+		    current_frequency = '4'; // 500KHz
+		    // SPI (+ SPI Irq) is enabled as Master, MODE 1, MBS, 500KHz
+		    SPCR = (1<<SPIE) | (1<<SPE) | (1<<MSTR) | (1<<SPR0);
+		    SPSR &= ~(1<<SPI2X);
+		    send_command_string_custom_rf();
+		    break;		
 		default:
 		{
 			my_printf(INVALID);
@@ -289,6 +306,180 @@ void send_command_string_custom_l3(void)
 	//actions_menu();
 	
 	send_command_string_custom_l3();
+}
+
+void send_command_string_custom_rf(void)
+{
+	char h = 0, l = 0, l1=0,l2=0;
+	uint16_t i = 0, j = 0, receive = 0;
+	
+	// Put out RF-> prompt
+	my_printf(RF_PROMPT);
+	while(i < 256)
+	{
+		h = getc245_blocking();
+		if(h == 13){ break; }
+		printf245("%c",h);
+		l = getc245_blocking();
+		if(l == 13){ break; }
+		printf245("%c ",l);
+		
+		if ((h == 'E') && (l == 'X'))
+		{
+			// Exit Custom L3> mode
+			menu();
+			return;
+		}
+
+		
+		if(h == 'R') // Receive
+		{
+			send_string[i] = 0x0100;
+		}
+		else if(l == 'H') // CS High
+		{
+			send_string[i] = 0x0101;
+		}
+		
+		else if(l == 'L') // CS Low
+		{
+			send_string[i] = 0x0102;
+		}
+		else if(l == 'Y')
+		{
+			send_string[i] = 0x0103;
+		}
+		else if ((h == 'L') && (l == '1'))
+		{
+			// Line 1 set LOW
+			send_string[i] = 0x0104;
+		}
+		else if ((h == 'L') && (l == '2'))
+		{
+			// Line 2 set LOW
+			send_string[i] = 0x0105;
+		}
+		else if ((h == 'H') && (l == '1'))
+		{
+			// Line 1 set HIGH
+			send_string[i] = 0x0106;
+		}
+		else if ((h == 'H') && (l == '2'))
+		{
+			// Line 2 set HIGH
+			send_string[i] = 0x0107;
+		}
+		else if ((h == '?') && (l == '1'))
+		{
+			// Check status Line 1
+			send_string[i] = 0x0108;
+		}
+		else if ((h == '?') && (l == '2'))
+		{
+			// Check status Line 2
+			send_string[i] = 0x0109;
+		}
+		else
+		{
+			if(h >= 48 && h <= 57){ h -= 48; } 	  // h is a number
+			else if(h >= 65 && h <= 70){ h -= 55; } // h is a letter
+			else if(h >= 97 && h <= 102){ h -= 87; } // h is a letter
+			else{ my_printf(INVALID); send_command_string_custom_l3(); }
+			
+			if(l >= 48 && l <= 57){ l -= 48; } 	  // l is a number
+			else if(l >= 65 && l <= 70){ l -= 55; } // l is a letter
+			else if(l >= 97 && l <= 102){ l -= 87; } // l is a letter
+			else{ my_printf(INVALID); send_command_string_custom_rf(); }
+			
+			h = (h<<4) + l;
+			send_string[i] = h;
+		}
+		
+		i++;
+		
+	}
+	printf245("\n\r");
+	
+	if (i == 0)
+	{
+		send_command_string_custom_rf();
+	}
+	
+	if(i == 256){ i--; }
+	for(j = 0; j < i; j++)
+	{
+		
+		if(send_string[j] == 0x0100) // Receive
+		{
+			send_spi_byte(0x00);
+			send_string[j] = 0x0200 + SPDR;
+		}
+		else if(send_string[j] == 0x0101){ deselect(); }// CS HIGH
+		else if(send_string[j] == 0x0102){ select(); } // CS LOW
+		else if(send_string[j] == 0x0103){ delay_ms(10); } // DELAY
+		else if(send_string[j] == 0x0104){ PORTC &= ~(1<<SDA); } // Line 1 set LOW
+		else if(send_string[j] == 0x0105){ PORTC &= ~(1<<SCL); } // Line 2 set LOW
+		else if(send_string[j] == 0x0106){ PORTC |= (1<<SDA); } // Line 1 set HIGH
+		else if(send_string[j] == 0x0107){ PORTC |= (1<<SCL); } // Line 2 set HIGH
+		else if(send_string[j] == 0x0108){ l1 = PINC & (1<<SDA); break; } // Check status Line 1 
+		else if(send_string[j] == 0x0109){ l2 = PINC & (1<<SCL); break; } // Check status Line 2		
+		else{ send_spi_byte(send_string[j]); }
+	}
+	deselect();
+	
+	// PRINT RESULTS
+	//for(j = 0; j < i; j++)
+	//{
+	
+	//	if(send_string[j] >= 0x0200){ printf245("R%d = 0x%x\n\r",receive,(send_string[j] & 0x00FF)); receive++; }
+	//	else if(send_string[j] == 0x0101){ my_printf(CS_HIGH); }
+	//	else if(send_string[j] == 0x0102){ my_printf(CS_LOW); }
+	//	else if(send_string[j] == 0x0103){ my_printf(DELAY); }
+	//	else{ printf245("Sent 0x%x\n\r", send_string[j]); }
+	//}
+	
+	if (send_string[j] == 0x0108) 
+	{
+		if (l1)
+		{
+			printf245("%c%c\n\r", 'H','1');
+		}
+		else
+		{
+		   printf245("%c%c ", 'L','1');	
+		   
+		   select(); // CS LOW
+		   do 
+		   {	   
+			   send_spi_byte(0x00);
+			   printf245("%x ", SPDR);
+			   receive++;
+			   l1 = PINC & (1<<SDA);
+			   
+		   } while ((l1 == 0) && (receive < 256));
+		   deselect();
+		   printf245("%c%c\n\r", 'H','1');
+		   
+		}
+		
+	} 
+	else if (send_string[j] == 0x0109)
+	{
+		if (l2)
+		{
+			printf245("%c%c\n\r", 'H','2');
+		}
+		else
+		{
+			printf245("%c%c\n\r", 'L','2');
+		}
+	}  
+	else
+	{
+		my_printf(STRING_SENT);
+	}
+	
+	send_command_string_custom_rf();
 }
 
 /*************************************************************************** 

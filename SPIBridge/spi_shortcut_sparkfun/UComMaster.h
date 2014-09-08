@@ -136,3 +136,4 @@ typedef struct{
 #define DELAY 24
 #define L3_PROMPT 25
 #define LINE_SET 26
+#define RF_PROMPT 27
