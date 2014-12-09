@@ -108,10 +108,16 @@
     </ToolchainSettings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="i2c.c">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="ft245.c">
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="ft245.h">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="i2c.h">
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="main.c">

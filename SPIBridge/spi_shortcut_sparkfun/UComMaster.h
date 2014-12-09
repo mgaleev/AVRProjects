@@ -137,3 +137,5 @@ typedef struct{
 #define L3_PROMPT 25
 #define LINE_SET 26
 #define RF_PROMPT 27
+#define I2C_PROMPT 28
+#define BL_PROMPT 29

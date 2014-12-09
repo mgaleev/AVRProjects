@@ -5,6 +5,8 @@
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
 
+#include "i2c.h"
+
 volatile uint8_t current_phase = '1';     // Mode 1
 volatile uint8_t current_dorder = '0';    // MSB First
 volatile uint8_t current_frequency = '4'; // 500KHz
@@ -39,8 +41,12 @@ void show_settings(void);
 
 void send_command_string_custom_l3(void);
 void send_command_string_custom_rf(void);
+void i2c_command_string(void);
+void i2c_addr_search (void);
 
-char const main_menu[] PROGMEM = "\n\r\n\r---Custom SparkFun SPI Shortcut v1.2---\n\r\n\rMAIN MENU:\n\r(1) Actions\n\r(2) Settings\n\r(3) Custom: L3 Board\n\r(4) Custom: RF Board\n\r\n\r";	
+void bl_spi_proxi (void);
+
+char const main_menu[] PROGMEM = "\n\r\n\r---Custom SparkFun SPI Shortcut v2.3---\n\r\n\rMAIN MENU:\n\r(1) Actions\n\r(2) Settings\n\r(3) Custom: L3 Board\n\r(4) Custom: RF Board\n\r(5) Custom: I2C\n\r(6) Custom: BL\n\r\n\r";	
 char const arrow[] PROGMEM = "->";
 char const invalid[] PROGMEM = "Invalid Character\n\r";
 char const send_single[] PROGMEM = "Enter characters to send, press enter to return to menu\n\r->";
@@ -69,6 +75,8 @@ char const command_delay[] PROGMEM = "Delay 10ms\n\r";
 char const l3_prompt[] PROGMEM = "L3->";
 char const line_set[] PROGMEM = "Line status is set!";
 char const rf_prompt[] PROGMEM = "RF->";
+char const i2c_prompt[] PROGMEM = "I2C->";
+char const bl_prompt[] PROGMEM = "BL->";
 
 PGM_P const string_table[] PROGMEM = 
 {
@@ -99,11 +107,14 @@ PGM_P const string_table[] PROGMEM =
 	command_delay,
 	l3_prompt,
 	line_set,
-	rf_prompt
+	rf_prompt,
+	i2c_prompt,
+	bl_prompt
 };
 
 
 char buffer[150];
+
 
 int main(void)
 {
@@ -122,6 +133,7 @@ int main(void)
 	PORTC |= ((1<<SDA) | (1<<SCL));
 	ioinit();
 	spi_init(); 
+	i2c_init(I2C_400KHZ);
 	menu();
 	
 
@@ -173,7 +185,45 @@ void menu()
 		    SPCR = (1<<SPIE) | (1<<SPE) | (1<<MSTR) | (1<<SPR0);
 		    SPSR &= ~(1<<SPI2X);
 		    send_command_string_custom_rf();
-		    break;		
+		    break;
+		case '6': //BL
+		    // Set Line 1 (PC4/SDA) Line 2 (PC5/SCL) configuration
+		    DDRC &= ~(1<<SDA); // in
+		    DDRC &= ~(1<<SCL); // in
+		    PORTC |= ((1<<SDA) | (1<<SCL)); // pull-up/pull-up
+		    // Set SPI configuration for communication with RFM board
+		    current_phase = '1';     // Mode 1
+		    current_dorder = '0';    // MSB First
+		    current_frequency = '4'; // 500KHz
+		    // SPI (+ SPI Irq) is enabled as Master, MODE 1, MBS, 500KHz
+		    SPCR = (1<<SPIE) | (1<<SPE) | (1<<MSTR) | (1<<SPR0);
+		    //SPSR &= ~(1<<SPI2X);
+			SPSR |= 0x01; // Frequency doubler: 1MHz
+		    bl_spi_proxi();
+		    break;	
+		case '5':
+		
+		   // activate internal pull-ups for twi
+           // as per note from atmega8 manual pg167
+           //sbi(PORTC, 4);
+           //sbi(PORTC, 5);
+
+           // initialize twi prescaler and bit rate
+           //cbi(TWSR, TWPS0); // TWI Status Register - Prescaler bits
+           //cbi(TWSR, TWPS1);
+
+           /* twi bit rate formula from atmega128 manual pg 204
+           SCL Frequency = CPU Clock Frequency / (16 + (2 * TWBR))
+           note: TWBR should be 10 or higher for master mode
+           It is 72 for a 16mhz Wiring board with 100kHz TWI */
+
+           //TWBR = ((CPU_FREQ / TWI_FREQ) - 16) / 2; // bitrate register
+           // enable twi module, acks, and twi interrupt
+		   
+		   //TWCR = 1 << TWEN; // enable twi module, no interrupt
+		
+		    i2c_command_string();
+		    break;				
 		default:
 		{
 			my_printf(INVALID);
@@ -181,6 +231,83 @@ void menu()
 			break;
 		}
 	}
+}
+
+void bl_spi_proxi(void)
+{
+  char byte_char, l1, h, l;
+  
+  // Put out BL-> prompt
+  my_printf(BL_PROMPT);
+  
+  h = 0;
+  l = 0;
+  while (1)
+  {
+	  byte_char = getchar245();
+	  if (byte_char)
+	  {
+		 if (h)
+		 {
+			 l = byte_char;
+		 }
+		 else
+		 {
+			 h = byte_char;
+		 }
+		 
+		 if((h == 13) || (h == 13))
+		 {  
+			 // Put out BL-> prompt
+			 my_printf(BL_PROMPT);
+			 h = 0;
+			 l = 0;
+		 }
+		 
+		 if ((h == 'E') && (l == 'X'))
+		 {
+			 // Exit Custom BL-> mode
+			 menu();
+			 return;
+		 }
+		 
+		 if (h && l)
+		 {
+			 if(h >= 48 && h <= 57){ h -= 48; } 	  // h is a number
+			 else if(h >= 65 && h <= 70){ h -= 55; } // h is a letter
+			 else if(h >= 97 && h <= 102){ h -= 87; } // h is a letter
+			 else{ h = 0; }
+			 
+			 if(l >= 48 && l <= 57){ l -= 48; } 	  // l is a number
+			 else if(l >= 65 && l <= 70){ l -= 55; } // l is a letter
+			 else if(l >= 97 && l <= 102){ l -= 87; } // l is a letter
+			 else{ l = 0; }
+			 
+			 h = (h<<4) + l;
+			 
+			 select();
+			 send_spi_byte(h);
+			 deselect();
+			 
+			 h = 0;
+			 l = 0;
+		 }
+		  
+	  }
+	  
+	  
+	  l1 = PINC & (1<<SDA);
+	  if (!l1)
+	  {
+		 select(); // CS LOW
+		 send_spi_byte(0x00);
+		 byte_char = SPDR;
+		 deselect(); 
+		 
+		 printf245("%x ", byte_char);
+	  }
+	  
+  }	
 }
 
 void send_command_string_custom_l3(void)
@@ -326,7 +453,7 @@ void send_command_string_custom_rf(void)
 		
 		if ((h == 'E') && (l == 'X'))
 		{
-			// Exit Custom L3> mode
+			// Exit Custom RF-> mode
 			menu();
 			return;
 		}
@@ -384,7 +511,7 @@ void send_command_string_custom_rf(void)
 			if(h >= 48 && h <= 57){ h -= 48; } 	  // h is a number
 			else if(h >= 65 && h <= 70){ h -= 55; } // h is a letter
 			else if(h >= 97 && h <= 102){ h -= 87; } // h is a letter
-			else{ my_printf(INVALID); send_command_string_custom_l3(); }
+			else{ my_printf(INVALID); send_command_string_custom_rf(); }
 			
 			if(l >= 48 && l <= 57){ l -= 48; } 	  // l is a number
 			else if(l >= 65 && l <= 70){ l -= 55; } // l is a letter
@@ -427,17 +554,7 @@ void send_command_string_custom_rf(void)
 	}
 	deselect();
 	
-	// PRINT RESULTS
-	//for(j = 0; j < i; j++)
-	//{
-	
-	//	if(send_string[j] >= 0x0200){ printf245("R%d = 0x%x\n\r",receive,(send_string[j] & 0x00FF)); receive++; }
-	//	else if(send_string[j] == 0x0101){ my_printf(CS_HIGH); }
-	//	else if(send_string[j] == 0x0102){ my_printf(CS_LOW); }
-	//	else if(send_string[j] == 0x0103){ my_printf(DELAY); }
-	//	else{ printf245("Sent 0x%x\n\r", send_string[j]); }
-	//}
-	
+
 	if (send_string[j] == 0x0108) 
 	{
 		if (l1)
@@ -480,6 +597,296 @@ void send_command_string_custom_rf(void)
 	}
 	
 	send_command_string_custom_rf();
+}
+
+void i2c_command_string(void)
+{
+	char h = 0, l = 0;
+	uint16_t i = 0, j = 0;
+	char i2c_addr_flag = 1, i2c_error = 0;
+	
+	// Put out I2C-> prompt
+	my_printf(I2C_PROMPT);
+	while(i < 256)
+	{
+		h = getc245_blocking();
+		if(h == 13){ break; }
+		printf245("%c",h);
+		l = getc245_blocking();
+		if(l == 13){ break; }
+		printf245("%c ",l);
+		
+		if ((h == 'E') && (l == 'X'))
+		{
+			// Exit I2C-> mode
+			menu();
+			return;
+		}
+
+		if ((h == 'S')&& (l == 'T')) //ST
+		{   //I2C Start 
+			send_string[i] = 0x0100;
+			
+			i2c_addr_flag = 1;
+		}
+		else if ((h == 'S')&& (l == 'P')) //SP
+		{   //I2C Stop
+			send_string[i] = 0x0101;
+		}
+		else if ((h == 'R') && (l == 'A'))
+		{   // Receive with ACK
+			send_string[i] = 0x0102;
+		}
+		else if ((h == 'R') && (l == 'N'))
+		{   // Receive with NACK
+			send_string[i] = 0x0103;
+		}
+		else if ((h == 'R') && (l == 'S'))
+		{   // Re-Start
+			send_string[i] = 0x0104;
+			i2c_addr_flag = 1;
+		}
+		else if((h == 'D') && (l == 'Y'))
+		{   // Delay 10ms
+			send_string[i] = 0x0105;
+		}
+		//else if ((h == 'A') && (l == 'T')) //AT
+		//{   // Address Test
+		//	send_string[i] = 0x0106;
+		//}
+		else
+		{
+			if(h >= 48 && h <= 57){ h -= 48; } 	  // h is a number
+			else if(h >= 65 && h <= 70){ h -= 55; } // h is a letter
+			else if(h >= 97 && h <= 102){ h -= 87; } // h is a letter
+			else{ my_printf(INVALID); i2c_command_string(); }
+			
+			if(l >= 48 && l <= 57){ l -= 48; } 	  // l is a number
+			else if(l >= 65 && l <= 70){ l -= 55; } // l is a letter
+			else if(l >= 97 && l <= 102){ l -= 87; } // l is a letter
+			else{ my_printf(INVALID); i2c_command_string(); }
+			
+			h = (h<<4) + l;
+			send_string[i] = h;
+			
+			if (i2c_addr_flag)
+			{
+				send_string[i] |= 0x0200;
+				i2c_addr_flag = 0;
+			}
+		}
+		
+		i++;
+		
+	} //End of while(i < 256)
+	printf245("\n\r");
+	
+	if (i == 0)
+	{
+		i2c_command_string();
+	}
+	
+	if(i == 256){ i--; }
+	for(j = 0; j < i; j++)
+	{
+		switch (send_string[j])
+		{
+			//case 0x0106: // I2C Address Test
+			//{
+			//	i2c_addr_search();
+			//	break;
+			//}
+			case 0x0105: // DELAY
+			{ 
+				delay_ms(10); 
+				printf245("%c%c ", 'D','Y');
+				break;
+			} 
+			case 0x0100: // I2C Start
+			{
+				TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN);
+				printf245("%c%c ", 'S','T');
+				while (!(TWCR & (1<<TWINT)));
+				if ((TWSR & 0xF8) != I2C_STATUS_START)
+				{
+					printf245("%c%x ",'N', TWSR & 0xF8); //Error
+					i2c_error++;
+				}
+				
+				break;
+			}
+			case 0x0104: // I2C Re-Start
+			{
+				TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWSTO)|(1<<TWEN);
+				printf245("%c%c ", 'R','S');
+				while (!(TWCR & (1<<TWINT)));
+				if ((TWSR & 0xF8) != I2C_STATUS_START) //I2C_STATUS_RSTART
+				{
+					printf245("%c%x ",'N', TWSR & 0xF8);//Error
+					i2c_error++;
+				}
+				
+				break;
+			}
+			case 0x0102: // Receive with ACK
+			{
+				TWCR = (1<<TWINT)|(1<<TWEA)|(1<<TWEN);
+				while (!(TWCR & (1<<TWINT)));
+				
+				send_string[j] = TWDR;
+				printf245("%x ", send_string[j]); 
+				
+				if ((TWSR & 0xF8) != I2C_STATUS_DATA_R_ACK)
+				{
+					printf245("%c%x ",'N', TWSR & 0xF8); //Error
+					i2c_error++;
+				}
+				
+				break;
+			}
+			case 0x0103: // Receive with NACK (the last byte)
+			{
+				TWCR = (1<<TWINT)|(1<<TWEN);
+				while (!(TWCR & (1<<TWINT)));
+				
+				send_string[j] = TWDR;
+				printf245("%x ", send_string[j]);
+				
+				if ((TWSR & 0xF8) != I2C_STATUS_DATA_R_NACK)
+				{
+					printf245("%c%x ",'N', TWSR & 0xF8);//Error
+					i2c_error++;
+				}
+				
+				break;
+			}
+			case 0x0101: // I2C Stop
+			{
+				TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO);
+				printf245("%c%c ", 'S','P');
+				break;
+			}
+			default:
+			{
+				if ((send_string[j] & 0xFF00) == 0x0200)
+				{  // Slave Addr + W/R
+					if (send_string[j] & 0x0001)
+					{  // Read
+					   TWDR = (char)(send_string[j]&0x00FF);
+					   TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+					   
+					   printf245("%x ", send_string[j]); 
+					   
+					   while (!(TWCR & (1<<TWINT)));
+					   if ((TWSR & 0xF8) != I2C_STATUS_SLA_R_ACK)
+					   {
+						  printf245("%c%X ",'N', TWSR & 0xF8);//Error
+						  i2c_error++;
+					   }	
+					}
+					else
+					{ // Write
+					  TWDR = (char)(send_string[j]&0x00FF);
+					  TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);	
+					  
+					  printf245("%x ", send_string[j]); 
+					  
+					  while (!(TWCR & (1<<TWINT)))
+					  if ((TWSR & 0xF8) != I2C_STATUS_SLA_W_ACK)
+					  {
+						 printf245("%c%x ",'N', TWSR & 0xF8);//Error
+						  i2c_error++;
+					  }
+					}
+				   	
+				}
+				else
+				{  // Transmit data
+				   TWDR = (char)(send_string[j]&0x00FF);
+				   TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+				   
+				   printf245("%x ", send_string[j]); 
+				   
+				   while (!(TWCR & (1<<TWINT)));
+				   if ((TWSR & 0xF8) != I2C_STATUS_DATA_W_ACK)
+				   {
+					   printf245("%c%x ",'N', TWSR & 0xF8);//Error
+					   i2c_error++;
+					   
+				   }
+				}
+				
+				break;
+			}
+			
+		}// End of switch (send_string[j])
+		
+		if (i2c_error)
+		{
+			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+			printf245("%c%c ", 'S','P');
+			break;
+		}
+		
+	}// End of for(j = 0; j < i; j++)
+	
+	printf245("\n\r");
+	i2c_command_string();
+}
+
+void i2c_addr_search (void)
+{
+	unsigned char i2c_addr = 0;
+	
+	printf245("\n\r");
+	
+	TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN)|(1<<TWEA);
+	printf245("%c%c ", 'S','T');
+	while (!(TWCR & (1<<TWINT)));
+	if ((TWSR & 0xF8) != I2C_STATUS_START)
+	{
+		printf245("%c%X ",'N', TWSR & 0xF8); //Error
+		//i2c_error++;
+		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+		printf245("%c%c\n\r", 'S','P');		
+		return;
+	}
+	
+	
+	for (i2c_addr=0x00; i2c_addr < 0x80; i2c_addr++)
+	{
+		TWDR = i2c_addr << 1;
+		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+		while (!(TWCR & (1<<TWINT)));
+		if ((TWSR & 0xF8) != I2C_STATUS_SLA_W_ACK)
+		{
+			printf245("%x %c%x\n\r", i2c_addr, 'N', TWSR & 0xF8);//Error
+			
+			TWCR = (1<<TWINT)|(1<<TWSTA)|(1<<TWEN)|(1<<TWEA);
+			printf245("%c%c ", 'R','S');
+			while (!(TWCR & (1<<TWINT)));
+			if ((TWSR & 0xF8) != I2C_STATUS_RSTART)
+			{
+				printf245("%c%X ",'N', TWSR & 0xF8); //Error
+				break;
+				//i2c_error++;
+			}
+			
+			//i2c_error++;
+		}
+		else
+		{
+			printf245("%x", i2c_addr);
+			break;
+		}
+		
+	}
+	
+	TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+	printf245("%c%c\n\r", 'S','P');
+	
+	return;
+	
 }
 
 /*************************************************************************** 
